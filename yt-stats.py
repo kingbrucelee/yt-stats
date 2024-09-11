@@ -2,13 +2,15 @@ import pandas as pd
 from googleapiclient.discovery import build
 import datetime
 from tqdm import tqdm
-
+import time
+import requests
+import isodate # Important for parsing IS0 8601 format of storing time
 # Set up the API client
 api_key = "YOUR_API_KEY"
 youtube = build("youtube", "v3", developerKey=api_key)
 
 # Define the playlist ID
-playlist_id = "PLXXXXXXXXXXXXXXXXXXXXXXXX"
+playlist_id = "PLAYLIST_ID"
 
 # Get all videos from the playlist
 videos = []
@@ -45,19 +47,27 @@ for i in tqdm(range(0, len(videos), 50), desc="Getting video data"):
         id=video_ids
     )
     response = request.execute()
-
     # Get the data for each video
+    # Attempt to make a clever way of handling API limits of 100 requests per minute
+    #t0 = time.perf_counter()
     for item in response["items"]:
         video_likes = item["statistics"].get("likeCount", 0)
         video_views = item["statistics"]["viewCount"]
-        video_duration = item["contentDetails"]["duration"]
+        video_duration = isodate.parse_duration(item["contentDetails"]["duration"]).seconds
         video_comments = item["statistics"].get("commentCount", 0)
         video_link = f"https://www.youtube.com/watch?v={item['id']}"
-        video_data.append((videos[i][1], datetime.datetime.strptime(videos[i][2][:10], "%Y-%m-%d"), video_likes, video_views, video_duration, video_link, video_comments))
+        time.sleep(0.4) 
+        r = requests.get(f"https://returnyoutubedislikeapi.com/votes?videoId={item['id']}").json()
+        video_data.append((videos[i][1], isodate.parse_datetime(videos[i][2]).date(), isodate.parse_datetime(videos[i][2]).time(), video_likes, video_views, video_duration // 60, video_duration % 60, video_link, video_comments, r['likes'], r['dislikes'], r['rawLikes'], r['rawDislikes'], r['rating']))
         i += 1
+    #t1 = time.perf_counter()
+    #print(t1-t0)
+    #if t1-t0 < 35:
+    #    time.sleep(35-(t1-t0))
 
 # Convert the video data to a pandas DataFrame
-df = pd.DataFrame(video_data, columns=["Title", "Date", "Likes", "Views", "Duration", "Link", "Comments"])
+# TODO Currently films over 1 hour will have more than 60 in "minutes". In other words there's no Duration_Hours field 
+df = pd.DataFrame(video_data, columns=["Title", "Date", "Time", "Likes", "Views", "Duration_Minutes", "Duration_Seconds", "Link", "Comments", 'RD_Current_Likes', 'RD_Extrapolated_Dislikes','RD_Recorded_Likes','RD_Recorded_Dislikes', 'RD_Rating'])
 
 # Write the DataFrame to an Excel spreadsheet
-df.to_excel("y.xlsx", index=False)
+df.to_excel("file_name.xlsx", index=False)
